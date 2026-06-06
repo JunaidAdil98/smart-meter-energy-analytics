@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Smart Meter Energy Analytics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=Hanken+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0A0D12; --panel:#121720; --panel2:#1A212C; --line:#27303D;
+    --text:#EAF1F8; --mut:#8595A8; --amber:#FFB23E; --cyan:#3ED6E6; --red:#FF6B6B; --green:#4FD18B;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'Hanken Grotesk',sans-serif;line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+    background-image:radial-gradient(900px 420px at 80% -8%,rgba(255,178,62,.10),transparent),
+                     radial-gradient(760px 380px at 0% 4%,rgba(62,214,230,.08),transparent);}
+  .wrap{max-width:1180px;margin:0 auto;padding:46px 26px 70px}
+  .eyebrow{font:600 11px/1 'IBM Plex Mono',monospace;letter-spacing:.24em;text-transform:uppercase;color:var(--amber);margin-bottom:13px}
+  h1{font-family:'Archivo',sans-serif;font-weight:800;font-size:clamp(28px,4.3vw,47px);letter-spacing:-.02em;line-height:1.02}
+  .sub{color:var(--mut);max-width:600px;margin-top:12px;font-size:15px}
+  .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:13px;margin:30px 0 8px}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:15px;
+    opacity:0;transform:translateY(10px);animation:rise .55s forwards}
+  .kpi .lab{font:600 10px/1.2 'IBM Plex Mono',monospace;letter-spacing:.09em;text-transform:uppercase;color:var(--mut)}
+  .kpi .val{font-family:'Archivo',sans-serif;font-weight:700;font-size:25px;margin-top:9px;letter-spacing:-.01em}
+  .kpi .val.am{color:var(--amber)} .kpi .val.cy{color:var(--cyan)}
+  .kpi .note{font-size:11px;color:var(--mut);margin-top:3px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:20px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px 20px 16px;
+    opacity:0;transform:translateY(10px);animation:rise .7s forwards}
+  .card.wide{grid-column:1 / -1}
+  .card h3{font-family:'Archivo',sans-serif;font-size:17px;font-weight:700;letter-spacing:-.01em}
+  .card p.cap{color:var(--mut);font-size:12.5px;margin-top:4px;margin-bottom:14px}
+  .chartbox{position:relative;height:270px}
+  .chartbox.tall{height:320px}
+  .insight{margin-top:13px;font-size:12.8px;color:var(--text);background:rgba(62,214,230,.08);
+    border-left:3px solid var(--cyan);padding:10px 13px;border-radius:0 8px 8px 0}
+  .insight b{color:var(--amber)}
+  .anom{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+  .anom .big{font-family:'Archivo',sans-serif;font-weight:800;font-size:34px;color:var(--green)}
+  .anom .d{font-size:13px;color:var(--mut)}
+  footer{margin-top:38px;border-top:1px solid var(--line);padding-top:20px;color:var(--mut);font-size:12.4px;line-height:1.7}
+  footer code{font-family:'IBM Plex Mono',monospace;background:var(--panel2);padding:1px 6px;border-radius:5px;font-size:11px}
+  @keyframes rise{to{opacity:1;transform:none}}
+  .kpi:nth-child(1){animation-delay:.04s}.kpi:nth-child(2){animation-delay:.09s}.kpi:nth-child(3){animation-delay:.14s}
+  .kpi:nth-child(4){animation-delay:.19s}.kpi:nth-child(5){animation-delay:.24s}.kpi:nth-child(6){animation-delay:.29s}
+  @media(max-width:880px){.kpis{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">AMI Portfolio · 144 meters · hourly · 2024</div>
+  <h1>Smart Meter Energy Analytics</h1>
+  <p class="sub">Profiling demand across 1.26M hourly readings: when the system peaks, how weather drives load, behavioural customer segments, faulty-meter detection, and a 14-day demand forecast.</p>
+
+  <section class="kpis" id="kpis"></section>
+
+  <div class="grid">
+    <div class="card wide">
+      <h3>Daily demand forecast — Holt-Winters</h3>
+      <p class="cap">Fit on a 35-day holdout, then projected 14 days forward. Accuracy = <span id="acc"></span>.</p>
+      <div class="chartbox tall"><canvas id="fcChart"></canvas></div>
+      <div class="insight" id="ins-fc"></div>
+    </div>
+    <div class="card">
+      <h3>Average load profile by hour</h3>
+      <p class="cap">Mean demand per meter across the day — where the system peaks.</p>
+      <div class="chartbox"><canvas id="loadChart"></canvas></div>
+    </div>
+    <div class="card">
+      <h3>Demand vs temperature</h3>
+      <p class="cap">U-shaped response: heating drives winter load, cooling drives summer.</p>
+      <div class="chartbox"><canvas id="tempChart"></canvas></div>
+      <div class="insight" id="ins-temp"></div>
+    </div>
+    <div class="card">
+      <h3>Consumption by usage segment</h3>
+      <p class="cap">KMeans on behavioural features (timing, load factor, weekend ratio).</p>
+      <div class="chartbox"><canvas id="segChart"></canvas></div>
+    </div>
+    <div class="card">
+      <h3>Monthly demand</h3>
+      <p class="cap">Total MWh by month — the seasonal heating/cooling shape.</p>
+      <div class="chartbox"><canvas id="monthChart"></canvas></div>
+    </div>
+    <div class="card wide">
+      <h3>Faulty-meter detection (robust / MAD)</h3>
+      <p class="cap">Flagging meters with zero-dropouts or implausible spikes, scored against ground truth.</p>
+      <div class="anom" id="anom"></div>
+    </div>
+  </div>
+
+  <footer>
+    <b>Stack:</b> Python (pandas, scikit-learn) · SQL for warehouse aggregation · Chart.js · GitHub Pages.<br>
+    <b>Methods:</b> load profiling · temperature-response (U-curve) analysis · KMeans behavioural segmentation · robust (median/MAD) anomaly detection · Holt-Winters seasonal forecasting.<br>
+    <b>Note:</b> data is synthetic (<code>generate_data.py</code> creates 1.26M readings); every figure is the real output of <code>analysis.py</code>. Methodology transfers directly to real AMI data.
+  </footer>
+</div>
+
+<script>
+const DATA = {"anomaly": {"flagged": 6, "true_faulty": 6, "recall": 1.0, "precision": 1.0, "examples": ["M2013", "M2041", "M2045", "M2057", "M2067", "M2074"]}, "kpis": {"meters": 144, "readings": 1261440, "total_mwh": 4066.2, "peak_demand_kw": 889.5, "load_factor": 0.522, "peak_hour": 9, "avg_daily_kwh_per_meter": 77.36}, "load_profile": {"hours": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23], "kwh": [2.092, 2.01, 1.98, 1.994, 2.116, 2.495, 3.197, 3.857, 4.162, 4.186, 4.174, 4.045, 4.006, 4.05, 3.986, 3.841, 3.687, 3.55, 3.555, 3.419, 3.218, 2.916, 2.546, 2.279]}, "temp_curve": [{"temp": -8, "demand_mwh": 15.76}, {"temp": -4, "demand_mwh": 13.65}, {"temp": 0, "demand_mwh": 12.84}, {"temp": 4, "demand_mwh": 11.92}, {"temp": 8, "demand_mwh": 11.29}, {"temp": 12, "demand_mwh": 10.12}, {"temp": 16, "demand_mwh": 9.55}, {"temp": 20, "demand_mwh": 9.03}, {"temp": 24, "demand_mwh": 9.61}], "temp_corr": -0.783, "monthly_mwh": [429.5, 376.5, 354.0, 306.0, 291.4, 275.9, 290.0, 290.1, 299.3, 360.9, 384.4, 408.2], "segments": [{"segment": "Low usage", "meters": 85, "total_mwh": 815.2}, {"segment": "Medium usage", "meters": 34, "total_mwh": 853.7}, {"segment": "High usage", "meters": 19, "total_mwh": 2319.1}], "forecast": {"accuracy_pct": 96.4, "mape_pct": 3.57, "params": {"alpha": 0.5, "beta": 0.01, "gamma": 0.3, "season": 7}, "test_dates": ["Nov 26", "Nov 27", "Nov 28", "Nov 29", "Nov 30", "Dec 01", "Dec 02", "Dec 03", "Dec 04", "Dec 05", "Dec 06", "Dec 07", "Dec 08", "Dec 09", "Dec 10", "Dec 11", "Dec 12", "Dec 13", "Dec 14", "Dec 15", "Dec 16", "Dec 17", "Dec 18", "Dec 19", "Dec 20", "Dec 21", "Dec 22", "Dec 23", "Dec 24", "Dec 25", "Dec 26", "Dec 27", "Dec 28", "Dec 29", "Dec 30"], "test_actual": [14.3, 13.3, 13.8, 13.9, 11.4, 10.6, 14.2, 13.8, 14.2, 14.7, 13.9, 11.5, 10.7, 15.0, 15.0, 15.0, 16.2, 14.1, 11.5, 10.9, 14.1, 14.5, 14.6, 16.0, 14.9, 11.6, 10.1, 13.8, 14.0, 15.5, 15.9, 14.5, 11.9, 10.4, 14.9], "test_forecast": [14.0, 13.5, 14.1, 14.2, 11.4, 10.6, 14.2, 14.2, 13.7, 14.2, 14.3, 11.6, 10.8, 14.4, 14.3, 13.8, 14.3, 14.5, 11.7, 10.9, 14.5, 14.4, 14.0, 14.5, 14.6, 11.9, 11.0, 14.6, 14.6, 14.1, 14.6, 14.8, 12.0, 11.2, 14.8], "future": [14.8, 14.7, 15.2, 14.4, 11.9, 11.0, 14.9, 14.9, 14.9, 15.4, 14.6, 12.0, 11.1, 15.1]}};
+const TEXT='#EAF1F8',MUT='#8595A8',AMBER='#FFB23E',CYAN='#3ED6E6',RED='#FF6B6B',GREEN='#4FD18B',LINE='#27303D';
+Chart.defaults.font.family="'Hanken Grotesk',sans-serif";Chart.defaults.font.size=12;Chart.defaults.color=MUT;
+const K=DATA.kpis,F=DATA.forecast,AN=DATA.anomaly;
+
+const cards=[
+  ['Meters',K.meters,'AMI endpoints',''],
+  ['Total demand',K.total_mwh.toLocaleString()+' MWh','2024','am'],
+  ['Peak demand',K.peak_demand_kw.toLocaleString()+' kW','system coincident','am'],
+  ['Peak hour',String(K.peak_hour).padStart(2,'0')+':00','daily max','cy'],
+  ['Load factor',K.load_factor,'avg ÷ peak',''],
+  ['Forecast acc.',F.accuracy_pct+'%','MAPE '+F.mape_pct+'%','cy'],
+];
+document.getElementById('kpis').innerHTML=cards.map(c=>
+  `<div class="kpi"><div class="lab">${c[0]}</div><div class="val ${c[3]}">${c[1]}</div><div class="note">${c[2]}</div></div>`).join('');
+
+const grid={grid:{color:'rgba(255,255,255,.05)'},border:{display:false}};
+const noGrid={grid:{display:false},border:{display:false}};
+const base=(e={})=>Object.assign({responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}},e);
+
+/* forecast */
+document.getElementById('acc').textContent=F.accuracy_pct+'%';
+const futLabels=Array.from({length:F.future.length},(_,i)=>'+'+(i+1)+'d');
+const labels=F.test_dates.concat(futLabels);
+const actual=F.test_actual.concat(F.future.map(()=>null));
+const fcast=F.test_forecast.concat(F.future);
+new Chart(fcChart,{type:'line',data:{labels,datasets:[
+  {label:'Actual',data:actual,borderColor:CYAN,backgroundColor:'transparent',borderWidth:2.5,pointRadius:0,tension:.3},
+  {label:'Forecast',data:fcast,borderColor:AMBER,borderDash:[5,4],backgroundColor:'transparent',borderWidth:2,pointRadius:0,tension:.3}]},
+  options:base({interaction:{mode:'index',intersect:false},
+    scales:{y:Object.assign({ticks:{callback:v=>v+''},title:{display:true,text:'MWh / day'}},grid),
+      x:Object.assign({ticks:{maxTicksLimit:12}},noGrid)},
+    plugins:{legend:{display:true,position:'bottom',labels:{usePointStyle:true,boxWidth:7,padding:16,color:MUT}},
+      tooltip:{callbacks:{label:c=>c.dataset.label+': '+(c.raw==null?'—':c.raw+' MWh')}}}})});
+document.getElementById('ins-fc').innerHTML=
+  `Holt-Winters (weekly seasonality) tracks the holdout to <b>${F.accuracy_pct}% accuracy</b> (MAPE ${F.mape_pct}%), then projects demand 14 days forward for capacity planning.`;
+
+/* load profile */
+const LP=DATA.load_profile;
+new Chart(loadChart,{type:'line',data:{labels:LP.hours.map(h=>h+'h'),
+  datasets:[{data:LP.kwh,borderColor:CYAN,backgroundColor:'rgba(62,214,230,.12)',fill:true,tension:.35,borderWidth:2.5,pointRadius:0}]},
+  options:base({scales:{y:Object.assign({title:{display:true,text:'kWh / meter'}},grid),x:noGrid},
+    plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw+' kWh'}}}})});
+
+/* temp curve */
+const TC=DATA.temp_curve;
+new Chart(tempChart,{type:'line',data:{labels:TC.map(d=>d.temp+'°C'),
+  datasets:[{data:TC.map(d=>d.demand_mwh),borderColor:AMBER,backgroundColor:'rgba(255,178,62,.12)',fill:true,tension:.3,borderWidth:2.5,pointRadius:3,pointBackgroundColor:AMBER}]},
+  options:base({scales:{y:Object.assign({title:{display:true,text:'avg MWh/day'}},grid),x:noGrid},
+    plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw+' MWh'}}}})});
+document.getElementById('ins-temp').innerHTML=
+  `Temperature–demand correlation is <b>${DATA.temp_corr}</b> — heating-dominated, with demand climbing again at the hot end (the classic U-curve).`;
+
+/* segments donut */
+const SG=DATA.segments;
+new Chart(segChart,{type:'doughnut',data:{labels:SG.map(s=>s.segment+' ('+s.meters+')'),
+  datasets:[{data:SG.map(s=>s.total_mwh),backgroundColor:[CYAN,AMBER,RED],borderColor:'#121720',borderWidth:3}]},
+  options:base({cutout:'58%',plugins:{legend:{display:true,position:'bottom',labels:{usePointStyle:true,boxWidth:8,padding:12,color:MUT}},
+    tooltip:{callbacks:{label:c=>c.label+': '+c.raw+' MWh'}}}})});
+
+/* monthly */
+const MM=DATA.monthly_mwh;
+new Chart(monthChart,{type:'bar',data:{labels:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
+  datasets:[{data:MM,backgroundColor:AMBER,borderRadius:5}]},
+  options:base({scales:{y:Object.assign({title:{display:true,text:'MWh'}},grid),x:noGrid},
+    plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw+' MWh'}}}})});
+
+/* anomaly */
+document.getElementById('anom').innerHTML=
+  `<div class="big">${AN.flagged}</div>`+
+  `<div class="d">faulty meters flagged of ${AN.true_faulty} planted &nbsp;·&nbsp; `+
+  `recall <b style="color:${GREEN}">${(AN.recall*100).toFixed(0)}%</b> &nbsp; precision <b style="color:${GREEN}">${(AN.precision*100).toFixed(0)}%</b><br>`+
+  `<span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">${AN.examples.join('  ·  ')}</span></div>`;
+</script>
+</body>
+</html>
